@@ -1,0 +1,2 @@
+# Engineering onboarding — week one guide (extract)
+Welcome to Blaugarnet Services. Week one: laptop + MDM enrollment day 1; access requests via the ticket portal (least privilege, expiring grants); read the infosec policy and sign; meet your buddy; shadow a delivery standup. Repos are monorepo-per-engagement; trunk-based, PRs need one senior review. Timesheets close Fridays 5pm — utilization drives staffing, log honestly. Ask questions in #eng-help; "I don't know the client context yet" is a fine sentence in your first month.

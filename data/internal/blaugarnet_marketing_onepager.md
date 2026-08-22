@@ -1,0 +1,2 @@
+# Blaugarnet Services Inc. — Who we are (client-facing one-pager)
+We are a 240-person software services firm that builds and integrates the systems mid-market companies run on. Practices: platform engineering, systems integration, data & AI enablement. 90+ delivered engagements; 68 NPS; SOC 2 Type II. Selected clients: logistics, healthcare, retail, and financial services leaders across North America. We deliver in small senior teams, milestone-priced, with weekly working demos from sprint one. *Blaugarnet Services Inc. — software that ships.*

@@ -1,0 +1,2 @@
+# QA release checklist — template (v1.4)
+Per release candidate: [ ] all P1/P2 defects closed or waived in writing [ ] regression suite green on staging [ ] performance smoke vs agreed targets [ ] accessibility scan on changed screens [ ] security scan clean or exceptions approved [ ] release notes drafted [ ] rollback plan tested [ ] client sign-off recorded per SOW acceptance section. Waivers require Delivery Lead + client counterpart in writing.

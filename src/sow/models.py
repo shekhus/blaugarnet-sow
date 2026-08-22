@@ -270,3 +270,106 @@ class EvidencePool(BaseModel):
     def chunk_ids(self) -> set[str]:
         """Chunk ids this section may cite. Anything else is a citation failure."""
         return {sc.chunk.chunk_id for sc in self.selected}
+
+
+# --------------------------------------------------------------------------- #
+# Stage 8 -- claim extraction (the model's structured output)
+# --------------------------------------------------------------------------- #
+
+
+class ExtractedClaim(BaseModel):
+    """One factual assertion the model found in one passage."""
+
+    fact_key: str = Field(
+        description="snake_case identifier for the fact, stable across passages."
+    )
+    value: str = Field(description="Shortest precise form of the value.")
+    chunk_id: str = Field(description="The passage this came from.")
+    quote: str = Field(description="Verbatim span copied from that passage.")
+    supports_elements: list[str] = Field(default_factory=list)
+
+
+class ClaimExtraction(BaseModel):
+    """The model's full response for one section."""
+
+    claims: list[ExtractedClaim] = Field(default_factory=list)
+
+
+class Claim(BaseModel):
+    """An extracted claim after verification, with provenance attached."""
+
+    claim_id: str
+    fact_key: str
+    value: str
+    value_norm: str
+    chunk_id: str
+    doc_id: str
+    quote: str
+    supports_elements: list[str] = Field(default_factory=list)
+    verified: bool = True
+    reject_reason: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Stage 10 -- analysis
+# --------------------------------------------------------------------------- #
+
+FindingKind = Literal[
+    "conflict",
+    "insufficient",
+    "provisional",
+    "internal_only_support",
+    "superseded_only_support",
+    "unverified_claim",
+]
+
+
+class Position(BaseModel):
+    """One distinct value on a contested fact, and what supports it."""
+
+    value: str
+    value_norm: str
+    claim_ids: list[str]
+    doc_ids: list[str]
+    audiences: list[str]
+    instruments: list[str]
+    best_rank: int
+    latest_date: date | None
+    internal_only: bool = Field(
+        description="Every document supporting this value is internal deliberation."
+    )
+
+
+class Finding(BaseModel):
+    """Something the draft must surface rather than resolve silently."""
+
+    kind: FindingKind
+    detail: str
+    fact_key: str | None = None
+    required_element: str | None = None
+    claim_ids: list[str] = Field(default_factory=list)
+    positions: list[Position] = Field(default_factory=list)
+    blocking: bool = Field(
+        default=False,
+        description=(
+            "Findings change how a section renders; they never withhold it. A run "
+            "that ends with no draft file is a failed run."
+        ),
+    )
+
+
+AnalysisStatus = Literal["clean", "conflict", "insufficient", "conflict_and_insufficient"]
+
+
+class SectionAnalysis(BaseModel):
+    """Everything stages 8-10 concluded about one section."""
+
+    section_id: int
+    title: str
+    status: AnalysisStatus
+    claims: list[Claim]
+    rejected: list[Claim]
+    findings: list[Finding]
+    covered_elements: list[str]
+    missing_elements: list[str]
+    pool_size: int

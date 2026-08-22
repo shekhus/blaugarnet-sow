@@ -17,6 +17,7 @@ DATA_DIR = REPO_ROOT / "data"
 OUTPUT_DIR = REPO_ROOT / "output"
 CONFIG_DIR = REPO_ROOT / "config"
 ROSTER_PATH = CONFIG_DIR / "engagements.toml"
+FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "golden_run"
 
 # The SOW template is a source document, but it defines the target structure
 # rather than supplying engagement facts. Stages that assemble evidence skip it.

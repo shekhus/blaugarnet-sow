@@ -16,11 +16,16 @@ import sys
 from pathlib import Path
 
 from .admission import build_partition
-from .config import DATA_DIR, OUTPUT_DIR, ConfigError, load_roster
+from .analysis import analyse_section
+from .claims import STAGE, SYSTEM_PROMPT, build_user_prompt, verify_claims
+from .config import DATA_DIR, FIXTURE_DIR, OUTPUT_DIR, ConfigError, load_roster
 from .evidence import DEFAULT_TOP_K, assemble_pool
 from .ingest import load_corpus
+from .llm import LlmClient
+from .models import ClaimExtraction
 from .pipeline import RunContext, build_context
-from .report import render_partition, render_pool, render_sections
+from .report import render_analysis, render_partition, render_pool, render_sections
+from .trace import Trace
 
 
 def _context(args: argparse.Namespace) -> RunContext:
@@ -104,6 +109,83 @@ def cmd_evidence(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_analyze(args: argparse.Namespace) -> int:
+    """Extract claims for one section, verify quotes, and analyse the result."""
+    ctx = _context(args)
+    spec = ctx.section(args.section)
+    pool = assemble_pool(spec, ctx.evidence, top_k=args.top_k)
+    llm = LlmClient(fixture_dir=FIXTURE_DIR)
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with Trace(OUTPUT_DIR / "trace.jsonl") as trace:
+        trace.event(
+            "partition",
+            admitted=[d.doc_id for d in ctx.partition.admitted],
+            excluded=[d.doc_id for d in ctx.partition.excluded],
+        )
+        trace.event(
+            "evidence_pool",
+            section_id=spec.section_id,
+            query=pool.query,
+            selected=[
+                {"chunk_id": s.chunk.chunk_id, "selector": s.selector, "score": s.score}
+                for s in pool.selected
+            ],
+            candidate_chunks=pool.candidate_chunks,
+            excluded_chunks=pool.excluded_chunks,
+        )
+
+        print(f"calling model ({llm.backend} backend, {llm.model}) for section {spec.section_id}...")
+        extraction = llm.parse(STAGE, SYSTEM_PROMPT, build_user_prompt(spec, pool), ClaimExtraction)
+
+        if args.tamper_quotes and extraction.claims:
+            victim = extraction.claims[0]
+            original = victim.quote
+            victim.quote = victim.quote.replace(" ", " slightly ", 1) or "not in the source"
+            print(
+                "\n[--tamper-quotes] corrupted one quote after extraction to exercise "
+                f"the verifier:\n    was: {original[:70]!r}\n    now: {victim.quote[:78]!r}\n"
+            )
+
+        trace.event(
+            "claim_extraction",
+            section_id=spec.section_id,
+            system_prompt_chars=len(SYSTEM_PROMPT),
+            user_prompt_chars=len(build_user_prompt(spec, pool)),
+            raw_claims=len(extraction.claims),
+        )
+
+        verified, rejected = verify_claims(extraction, pool)
+        trace.event(
+            "quote_verification",
+            section_id=spec.section_id,
+            verified=[c.claim_id for c in verified],
+            rejected=[
+                {"claim_id": c.claim_id, "reason": c.reject_reason, "quote": c.quote}
+                for c in rejected
+            ],
+        )
+
+        analysis = analyse_section(spec, pool, verified, rejected, ctx.partition.provenance)
+        trace.event(
+            "analysis",
+            section_id=spec.section_id,
+            status=analysis.status,
+            findings=[f.model_dump(mode="json") for f in analysis.findings],
+            missing_elements=analysis.missing_elements,
+        )
+        trace.event("token_usage", **llm.usage.per_stage)
+
+    print(render_analysis(analysis, ctx))
+    print(llm.usage.summary(llm.model))
+    print(f"trace written to {OUTPUT_DIR / 'trace.jsonl'}")
+
+    if args.json:
+        _write_json(args.json, analysis.model_dump_json(indent=2))
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser."""
     parser = argparse.ArgumentParser(
@@ -170,7 +252,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ev.set_defaults(func=cmd_evidence)
 
-    for sub_parser in (p_part, p_tpl, p_chunks, p_ev):
+    p_an = sub.add_parser(
+        "analyze",
+        help="Extract claims for one section, verify quotes, and detect conflicts.",
+    )
+    p_an.add_argument("--section", type=int, required=True, help="Section number, 1-12.")
+    p_an.add_argument("--top-k", type=int, default=DEFAULT_TOP_K, help="BM25 hits to select.")
+    p_an.add_argument(
+        "--tamper-quotes",
+        action="store_true",
+        help=(
+            "Corrupt one returned quote before verification, to demonstrate that the "
+            "verifier rejects any quote that is not a verbatim substring of its passage."
+        ),
+    )
+    p_an.add_argument(
+        "--json",
+        nargs="?",
+        const=str(OUTPUT_DIR / "analysis.json"),
+        help="Also write the analysis as JSON.",
+    )
+    p_an.set_defaults(func=cmd_analyze)
+
+    for sub_parser in (p_part, p_tpl, p_chunks, p_ev, p_an):
         sub_parser.add_argument("--data", help="Override the data directory.")
         sub_parser.add_argument("--roster", help="Override the engagement roster TOML.")
 

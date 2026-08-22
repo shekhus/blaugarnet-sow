@@ -6,7 +6,7 @@ a single drafted word.
 
 from __future__ import annotations
 
-from .models import EvidencePool, Partition, SectionSpec
+from .models import EvidencePool, Partition, SectionAnalysis, SectionSpec
 from .pipeline import RunContext
 
 _RULE = "-" * 100
@@ -70,7 +70,7 @@ def render_partition(partition: Partition, verbose: bool = False) -> str:
 def _one_line(text: str, width: int) -> str:
     """Collapse a chunk to a single line for tabular display."""
     flat = " ".join(text.split())
-    return flat if len(flat) <= width else flat[: width - 1] + "…"
+    return flat if len(flat) <= width else flat[: width - 3] + "..."
 
 
 def render_sections(sections: list[SectionSpec]) -> str:
@@ -127,6 +127,96 @@ def render_pool(pool: EvidencePool, ctx: RunContext, show_text: bool = True) -> 
                 else ""
             )
             add(f"{'':<10} {'':>7}  {_one_line(chunk.text, 96)}{flag}")
+
+    add(_RULE)
+    add("")
+    return "\n".join(lines)
+
+
+_KIND_LABEL = {
+    "conflict": "CONFLICT",
+    "insufficient": "INSUFFICIENT",
+    "provisional": "PROVISIONAL",
+    "internal_only_support": "INTERNAL-ONLY",
+    "superseded_only_support": "SUPERSEDED-ONLY",
+    "unverified_claim": "REJECTED",
+}
+
+
+def render_analysis(analysis: SectionAnalysis, ctx: RunContext) -> str:
+    """Render claims, quote-verification results and findings for one section."""
+    lines: list[str] = []
+    add = lines.append
+    provs = ctx.partition.provenance
+
+    add("")
+    add(f"ANALYSIS -- section {analysis.section_id}. {analysis.title}")
+    add(_RULE)
+    add(f"status            : {analysis.status.upper()}")
+    add(f"evidence pool     : {analysis.pool_size} passages")
+    add(
+        f"claims            : {len(analysis.claims)} verified, "
+        f"{len(analysis.rejected)} rejected"
+    )
+    add(f"required elements : {len(analysis.covered_elements)} covered, "
+        f"{len(analysis.missing_elements)} missing")
+    add(_RULE)
+
+    add("")
+    add("QUOTE VERIFICATION")
+    add(f"  {len(analysis.claims)}/{len(analysis.claims) + len(analysis.rejected)} quotes "
+        f"confirmed as verbatim substrings of the passage they cite")
+    for claim in analysis.rejected:
+        add(f"  REJECTED {claim.claim_id}  fact_key={claim.fact_key}")
+        add(f"           {claim.reject_reason}")
+        add(f"           quote: {_one_line(claim.quote, 88)}")
+
+    by_key: dict[str, list] = {}
+    for claim in analysis.claims:
+        by_key.setdefault(claim.fact_key, []).append(claim)
+
+    add("")
+    add(f"CLAIMS BY FACT KEY ({len(by_key)} keys)")
+    for fact_key in sorted(by_key):
+        members = by_key[fact_key]
+        values = {c.value_norm for c in members}
+        marker = "  <-- values disagree" if len(values) > 1 else ""
+        add(f"  {fact_key}{marker}")
+        for claim in members:
+            prov = provs[claim.doc_id]
+            add(
+                f"      {claim.claim_id}  {claim.value!r}"
+                f"   [{prov.audience}/{prov.instrument}/{prov.status}]"
+            )
+            add(f"          {claim.chunk_id}")
+            add(f'          "{_one_line(claim.quote, 92)}"')
+
+    add("")
+    add(f"FINDINGS ({len(analysis.findings)})")
+    if not analysis.findings:
+        add("  none")
+    for finding in analysis.findings:
+        label = _KIND_LABEL.get(finding.kind, finding.kind.upper())
+        subject = finding.fact_key or finding.required_element or ""
+        add(f"  [{label}] {subject}")
+        add(f"      {finding.detail}")
+        for position in finding.positions:
+            flag = " (internal-only support)" if finding.kind == "conflict" and position.internal_only else ""
+            add(
+                f"      value: {position.value!r}{flag}"
+                f"  <- {', '.join(position.doc_ids)}"
+            )
+            add(
+                f"          audience={'/'.join(position.audiences)} "
+                f"instrument={'/'.join(position.instruments)} "
+                f"claims={', '.join(position.claim_ids)}"
+            )
+
+    if analysis.missing_elements:
+        add("")
+        add("MISSING REQUIRED ELEMENTS (no admitted source supports these)")
+        for element in analysis.missing_elements:
+            add(f"  - {element}")
 
     add(_RULE)
     add("")

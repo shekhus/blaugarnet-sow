@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -373,3 +373,128 @@ class SectionAnalysis(BaseModel):
     covered_elements: list[str]
     missing_elements: list[str]
     pool_size: int
+
+
+# --------------------------------------------------------------------------- #
+# Stage 11 -- drafting
+# --------------------------------------------------------------------------- #
+
+
+class DraftedSection(BaseModel):
+    """The model's contribution to a section: prose only.
+
+    The model never writes status banners, conflict blocks, gap notices or the
+    citation table. Those are rendered from ``Finding`` records by code, so
+    "every finding is surfaced" is guaranteed structurally rather than
+    requested in a prompt.
+    """
+
+    body_markdown: str = Field(
+        description="Prose for the settled material only, every assertion carrying a [Cn] marker."
+    )
+    drafting_notes: list[str] = Field(
+        default_factory=list,
+        description="Anything the model could not state from the claims it was given.",
+    )
+
+
+class Citation(BaseModel):
+    """A resolvable pointer from a marker in the draft to a source passage."""
+
+    marker: str
+    chunk_id: str
+    doc_id: str
+    quote: str
+    line_start: int
+    line_end: int
+    instrument: str
+    audience: str
+    status: str
+
+
+class ValidationIssue(BaseModel):
+    """One deterministic gate failure against a drafted section."""
+
+    gate: Literal[
+        "citation_resolves",
+        "citation_in_scope",
+        "uncited_assertion",
+        "foreign_entity",
+        "empty_body",
+    ]
+    detail: str
+    excerpt: str | None = None
+
+
+ReviewDecision = Literal["pending", "approved", "rejected", "rejected_unsatisfiable"]
+
+
+class ReviewRecord(BaseModel):
+    """What a reviewer did with a section, and what came of it."""
+
+    decision: ReviewDecision = "pending"
+    comment: str | None = None
+    revision: int = 0
+    unsatisfiable_reason: str | None = None
+
+
+SectionStatus = Literal[
+    "drafted",
+    "conflict",
+    "insufficient",
+    "conflict_and_insufficient",
+    "unsupported",
+]
+
+
+class SectionDraft(BaseModel):
+    """One finished section: prose, citations, findings and review state.
+
+    ``status`` controls how a section renders, never whether it renders. A run
+    that ends without a draft file is a failed run.
+    """
+
+    section_id: int
+    title: str
+    status: SectionStatus
+    body_markdown: str
+    citations: list[Citation]
+    findings: list[Finding]
+    missing_elements: list[str]
+    open_item_ids: list[str] = Field(default_factory=list)
+    issues: list[ValidationIssue] = Field(default_factory=list)
+    revision: int = 0
+    review: ReviewRecord = Field(default_factory=ReviewRecord)
+
+
+class OpenQuestion(BaseModel):
+    """A numbered entry in the assembled Assumptions & Open Questions section."""
+
+    ref: str
+    section_id: int
+    kind: FindingKind
+    detail: str
+    positions: list[Position] = Field(default_factory=list)
+
+
+class CrossSectionIssue(BaseModel):
+    """One fact resolved differently in two or more sections.
+
+    Reported and rendered; never allowed to block the artifact. A corpus where
+    something is genuinely unresolvable would otherwise produce no draft at all.
+    """
+
+    fact_key: str
+    section_ids: list[int]
+    values: list[str]
+    detail: str
+
+
+class DraftRun(BaseModel):
+    """The whole run: every section, the open-question rollup, and spend."""
+
+    sections: list[SectionDraft]
+    open_questions: list[OpenQuestion]
+    cross_section_issues: list[CrossSectionIssue]
+    model: str
+    token_usage: dict[str, Any] = Field(default_factory=dict)

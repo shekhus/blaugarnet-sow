@@ -32,7 +32,9 @@ from .llm import LlmClient
 from .models import ClaimExtraction
 from .pipeline import RunContext, build_context
 from .report import render_analysis, render_partition, render_pool, render_sections
+from .run import run_draft
 from .trace import Trace
+from .validate import MAX_REVISIONS
 
 
 def _context(args: argparse.Namespace) -> RunContext:
@@ -193,6 +195,45 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_draft(args: argparse.Namespace) -> int:
+    """Draft every section end to end and write the document, trace and records."""
+    ctx = _context(args)
+    llm = LlmClient(fixture_dir=FIXTURE_DIR)
+    sections = (
+        [int(x) for x in args.sections.split(",")] if args.sections else None
+    )
+
+    print(f"drafting via {llm.backend} backend, model {llm.model}")
+    run = run_draft(
+        ctx,
+        llm,
+        OUTPUT_DIR,
+        section_ids=sections,
+        top_k=args.top_k,
+        max_revisions=args.max_revisions,
+    )
+
+    print()
+    print("SECTION SUMMARY")
+    print("-" * 100)
+    for draft in sorted(run.sections, key=lambda d: d.section_id):
+        print(
+            f"  {draft.section_id:>2}. {draft.title:<34} {draft.status:<26}"
+            f" {len(draft.citations):>2} cites  rev {draft.revision}"
+        )
+    print("-" * 100)
+    print(f"open questions       : {len(run.open_questions)}")
+    print(f"cross-section issues : {len(run.cross_section_issues)}")
+    for issue in run.cross_section_issues:
+        print(f"    {issue.detail}")
+    print()
+    print(llm.usage.summary(llm.model))
+    print(f"draft written to {OUTPUT_DIR / 'sow_draft.md'}")
+    print(f"trace written to {OUTPUT_DIR / 'trace.jsonl'}")
+    print(f"records written to {OUTPUT_DIR / 'run.json'}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser."""
     parser = argparse.ArgumentParser(
@@ -281,7 +322,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_an.set_defaults(func=cmd_analyze)
 
-    for sub_parser in (p_part, p_tpl, p_chunks, p_ev, p_an):
+    p_dr = sub.add_parser(
+        "draft",
+        help="Draft every section end to end and write output/sow_draft.md.",
+    )
+    p_dr.add_argument(
+        "--sections",
+        help="Comma-separated section numbers. Default: all 12.",
+    )
+    p_dr.add_argument("--top-k", type=int, default=DEFAULT_TOP_K, help="BM25 hits per section.")
+    p_dr.add_argument(
+        "--max-revisions",
+        type=int,
+        default=MAX_REVISIONS,
+        help=f"Redraft attempts after a validation failure (default {MAX_REVISIONS}).",
+    )
+    p_dr.set_defaults(func=cmd_draft)
+
+    for sub_parser in (p_part, p_tpl, p_chunks, p_ev, p_an, p_dr):
         sub_parser.add_argument("--data", help="Override the data directory.")
         sub_parser.add_argument("--roster", help="Override the engagement roster TOML.")
 

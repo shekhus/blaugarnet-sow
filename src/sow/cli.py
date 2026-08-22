@@ -18,7 +18,14 @@ from pathlib import Path
 from .admission import build_partition
 from .analysis import analyse_section
 from .claims import STAGE, SYSTEM_PROMPT, build_user_prompt, verify_claims
-from .config import DATA_DIR, FIXTURE_DIR, OUTPUT_DIR, ConfigError, load_roster
+from .config import (
+    DATA_DIR,
+    FIXTURE_DIR,
+    OUTPUT_DIR,
+    ConfigError,
+    load_dotenv,
+    load_roster,
+)
 from .evidence import DEFAULT_TOP_K, assemble_pool
 from .ingest import load_corpus
 from .llm import LlmClient
@@ -283,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Configuration errors fail loudly with a non-zero exit."""
+    load_dotenv()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

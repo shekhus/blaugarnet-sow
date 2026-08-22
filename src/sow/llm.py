@@ -1,12 +1,16 @@
 """Model client: structured calls, token accounting, and a mock backend.
 
-Structured output is obtained with ``client.messages.parse(output_format=...)``,
+This is the only provider-specific module in the pipeline. Everything
+downstream consumes validated pydantic models and is indifferent to which API
+produced them, so swapping providers means replacing this file and nothing else.
+
+Structured output goes through ``chat.completions.parse(response_format=...)``,
 which validates the response against a pydantic model before it reaches the
 pipeline. A malformed response fails here rather than three stages later.
 
 Two backends:
 
-* ``live``  -- the Anthropic API. Needs ``ANTHROPIC_API_KEY``.
+* ``live``  -- the OpenAI API. Needs ``OPENAI_API_KEY``.
 * ``mock``  -- replays a recorded run from ``tests/fixtures/golden_run``. Needs
   no key, so the quality checks run on a cold clone.
 
@@ -28,12 +32,13 @@ from .config import ConfigError
 
 T = TypeVar("T", bound=BaseModel)
 
-# Claude Opus 5. Override with SOW_MODEL if you want to run the pipeline on a
-# different model; the pipeline itself is model-agnostic.
-DEFAULT_MODEL = "claude-opus-5"
+# Override with SOW_MODEL. The pipeline is model-agnostic; this default is
+# simply the current flagship chat model in the pinned SDK.
+DEFAULT_MODEL = "gpt-5.4"
 
-# USD per million tokens, for the cost line in the run summary.
-PRICE_PER_MTOK = {"claude-opus-5": (5.0, 25.0)}
+# USD per million tokens (input, output), for the cost line in the run summary.
+# Absent entries just omit the cost line rather than reporting a guess.
+PRICE_PER_MTOK: dict[str, tuple[float, float]] = {}
 
 
 @dataclass
@@ -43,22 +48,20 @@ class TokenUsage:
     calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
+    reasoning_tokens: int = 0
     per_stage: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def record(self, stage: str, usage: Any) -> None:
         """Accumulate one call's usage, globally and per pipeline stage."""
-        inp = int(getattr(usage, "input_tokens", 0) or 0)
-        out = int(getattr(usage, "output_tokens", 0) or 0)
-        cread = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
-        cwrite = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        inp = int(getattr(usage, "prompt_tokens", 0) or 0)
+        out = int(getattr(usage, "completion_tokens", 0) or 0)
+        details = getattr(usage, "completion_tokens_details", None)
+        reasoning = int(getattr(details, "reasoning_tokens", 0) or 0) if details else 0
 
         self.calls += 1
         self.input_tokens += inp
         self.output_tokens += out
-        self.cache_read_tokens += cread
-        self.cache_write_tokens += cwrite
+        self.reasoning_tokens += reasoning
 
         bucket = self.per_stage.setdefault(
             stage, {"calls": 0, "input_tokens": 0, "output_tokens": 0}
@@ -86,10 +89,8 @@ class TokenUsage:
             f"output tokens      : {self.output_tokens:,}",
             f"total tokens       : {self.input_tokens + self.output_tokens:,}",
         ]
-        if self.cache_read_tokens or self.cache_write_tokens:
-            lines.append(
-                f"cache read/write   : {self.cache_read_tokens:,} / {self.cache_write_tokens:,}"
-            )
+        if self.reasoning_tokens:
+            lines.append(f"  of which reasoning: {self.reasoning_tokens:,}")
         for stage, bucket in sorted(self.per_stage.items()):
             lines.append(
                 f"  {stage:<17}: {bucket['calls']} call(s), "
@@ -106,8 +107,37 @@ class LlmError(RuntimeError):
     """Raised when the model cannot be reached or its response is unusable."""
 
 
+def _key_source_hint(exc: Exception) -> str:
+    """On an auth failure, say where the key came from.
+
+    An exported OPENAI_API_KEY takes precedence over one written in .env.
+    Without this hint, replacing a bad key in .env while a stale one is still
+    exported looks like the new key being rejected.
+    """
+    text = str(exc)
+    if "authentication" not in text.lower() and "401" not in text:
+        return ""
+
+    from .config import ENV_PATH
+
+    key = os.environ.get("OPENAI_API_KEY", "")
+    if not key:
+        return "\n  hint: OPENAI_API_KEY is not set."
+
+    fingerprint = f"{key[:8]}...{key[-4:]}" if len(key) > 15 else "(short value)"
+    hint = f"\n  hint: the key in use is {fingerprint} ({len(key)} chars)."
+    if ENV_PATH.is_file():
+        hint += (
+            f"\n        {ENV_PATH.name} exists, but an exported OPENAI_API_KEY takes "
+            f"precedence over it. Unset the shell variable to use the .env value."
+        )
+    else:
+        hint += f"\n        No {ENV_PATH.name} file found; the key came from the environment."
+    return hint
+
+
 class LlmClient:
-    """Thin wrapper over the Anthropic SDK with usage accounting."""
+    """Thin wrapper over the OpenAI SDK with usage accounting."""
 
     def __init__(
         self,
@@ -151,29 +181,38 @@ class LlmClient:
         max_tokens: int,
         effort: str,
     ) -> T:
-        """Call the Anthropic API and validate the structured response."""
+        """Call the OpenAI API and validate the structured response."""
         client = self._live_client()
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "response_format": output_format,
+            "max_completion_tokens": max_tokens,
+        }
+        if effort:
+            request["reasoning_effort"] = effort
+
         try:
-            response = client.messages.parse(
-                model=self.model,
-                max_tokens=max_tokens,
-                system=system,
-                messages=[{"role": "user", "content": user}],
-                output_format=output_format,
-                thinking={"type": "adaptive"},
-                output_config={"effort": effort},
-            )
+            response = client.chat.completions.parse(**request)
         except Exception as exc:  # surfaced, never swallowed
-            raise LlmError(f"{stage}: model call failed: {exc}") from exc
+            raise LlmError(f"{stage}: model call failed: {exc}{_key_source_hint(exc)}") from exc
 
         self.usage.record(stage, response.usage)
 
-        if getattr(response, "stop_reason", None) == "refusal":
-            raise LlmError(f"{stage}: model declined the request")
+        message = response.choices[0].message
+        if getattr(message, "refusal", None):
+            raise LlmError(f"{stage}: model declined the request: {message.refusal}")
 
-        parsed = getattr(response, "parsed_output", None)
+        parsed = getattr(message, "parsed", None)
         if parsed is None:
-            raise LlmError(f"{stage}: model returned no parseable structured output")
+            finish = getattr(response.choices[0], "finish_reason", "unknown")
+            raise LlmError(
+                f"{stage}: model returned no parseable structured output "
+                f"(finish_reason={finish}). If this is 'length', raise max_completion_tokens."
+            )
         return parsed
 
     def _live_client(self) -> Any:
@@ -181,17 +220,17 @@ class LlmClient:
         if self._client is not None:
             return self._client
         try:
-            import anthropic
+            from openai import OpenAI
         except ImportError as exc:
             raise ConfigError(
-                "the 'anthropic' package is required for live runs: pip install -e '.[llm]'"
+                "the 'openai' package is required for live runs: pip install -e '.[llm]'"
             ) from exc
-        if not os.environ.get("ANTHROPIC_API_KEY"):
+        if not os.environ.get("OPENAI_API_KEY"):
             raise ConfigError(
-                "ANTHROPIC_API_KEY is not set. Set it, or run with SOW_LLM=mock "
-                "to replay the committed golden run."
+                "OPENAI_API_KEY is not set. Put it in .env (see .env.example), export it, "
+                "or run with SOW_LLM=mock to replay the committed golden run."
             )
-        self._client = anthropic.Anthropic()
+        self._client = OpenAI()
         return self._client
 
     # ---------------------------------------------------------------- mock --
@@ -236,8 +275,8 @@ class LlmClient:
                     "stage": stage,
                     "model": self.model,
                     "usage": {
-                        "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
-                        "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+                        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+                        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
                     },
                     "parsed_output": parsed.model_dump(mode="json"),
                 },
@@ -251,5 +290,5 @@ class LlmClient:
 class _MockUsage:
     """Usage shape for replayed calls."""
 
-    input_tokens: int = 0
-    output_tokens: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0

@@ -6,6 +6,7 @@ use (see ``sow.llm``), never from a config file.
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass
 from functools import lru_cache
@@ -24,8 +25,44 @@ FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "golden_run"
 TEMPLATE_DOC_ID = "sow_template.md"
 
 
+ENV_PATH = REPO_ROOT / ".env"
+
+
 class ConfigError(RuntimeError):
     """Raised when configuration is missing or malformed. Never swallowed."""
+
+
+def load_dotenv(path: Path | None = None) -> list[str]:
+    """Load ``KEY=value`` pairs from ``.env`` into the environment.
+
+    Hand-rolled rather than pulling in python-dotenv: it is twenty lines and the
+    dependency list is meant to stay short enough that a reviewer can install
+    this on a clean machine without thinking about it.
+
+    Real environment variables always win, so an exported key is never silently
+    overridden by a stale file. Returns the names of the variables it set, for
+    the startup report.
+    """
+    env_path = path or ENV_PATH
+    if not env_path.is_file():
+        return []
+
+    applied: list[str] = []
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+            applied.append(key)
+    return applied
 
 
 @dataclass(frozen=True)

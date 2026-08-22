@@ -1,0 +1,32 @@
+# Engagement roster.
+#
+# This file declares WHO THE CLIENTS ARE. It declares no answers about scope,
+# rates, dates, obligations or conflicts. In a real deployment this would be a
+# CRM lookup rather than a committed file.
+#
+# The roster is used only to label each source document with the engagement it
+# is ABOUT, so that documents belonging to other clients can be excluded from
+# the evidence pool before retrieval runs. Matching is case-insensitive
+# substring matching against two signals per document: its H1 title line and
+# its filename stem. Body text does not vote -- see provenance.classify_engagement.
+#
+# Editing this file changes which documents are admitted as evidence.
+# tests/test_admission.py pins the expected partition of data/ and will fail
+# loudly if an edit here changes it.
+
+# The engagement the SOW is being drafted for. Documents labelled with this
+# engagement are admitted; so are documents labelled "company".
+target = "harding"
+
+# Company-wide markers. A document whose subject names no client but does name
+# the company is company-wide (rate cards, policies, the SOW template).
+company_markers = ["blaugarnet"]
+
+# Known client engagements and the aliases that identify them in a title or
+# filename. A document whose subject names a client other than the target is
+# hard-excluded from the evidence pool.
+[clients]
+harding = ["harding"]
+northgate = ["northgate"]
+atlas = ["atlas"]
+helios = ["helios"]

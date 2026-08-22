@@ -1,0 +1,4 @@
+# Verbatim quote verification compares stored citations against files read from
+# disk. Normalise line endings so a clone on any OS matches the golden run.
+* text=auto eol=lf
+*.docx binary

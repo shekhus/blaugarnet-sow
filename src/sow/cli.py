@@ -1,11 +1,11 @@
 """Command-line entry point.
 
-Checkpoint 1 exposes one command:
+Stages 1-7 are inspectable without calling a model or setting an API key:
 
-    sow partition [--verbose] [--json PATH]
-
-which runs stages 1-3 (ingest, provenance, admission) and prints the corpus
-partition. No model is called and no API key is required.
+    sow partition [--verbose]   which documents are evidence, and why
+    sow template                sections and required elements parsed from the template
+    sow chunks [--doc X]        how documents were split into citable passages
+    sow evidence --section N    the pool one section may draw on, with scores
 """
 
 from __future__ import annotations
@@ -17,8 +17,26 @@ from pathlib import Path
 
 from .admission import build_partition
 from .config import DATA_DIR, OUTPUT_DIR, ConfigError, load_roster
+from .evidence import DEFAULT_TOP_K, assemble_pool
 from .ingest import load_corpus
-from .report import render_partition
+from .pipeline import RunContext, build_context
+from .report import render_partition, render_pool, render_sections
+
+
+def _context(args: argparse.Namespace) -> RunContext:
+    """Build the shared run context from common CLI options."""
+    return build_context(
+        data_dir=Path(args.data) if args.data else None,
+        roster_path=Path(args.roster) if args.roster else None,
+    )
+
+
+def _write_json(path_arg: str, payload: str) -> None:
+    """Write a JSON payload, creating parent directories."""
+    out_path = Path(path_arg)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(payload, encoding="utf-8")
+    print(f"written to {out_path}")
 
 
 def cmd_partition(args: argparse.Namespace) -> int:
@@ -30,10 +48,58 @@ def cmd_partition(args: argparse.Namespace) -> int:
     print(render_partition(partition, verbose=args.verbose))
 
     if args.json:
-        out_path = Path(args.json)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(partition.model_dump_json(indent=2), encoding="utf-8")
-        print(f"partition written to {out_path}")
+        _write_json(args.json, partition.model_dump_json(indent=2))
+
+    return 0
+
+
+def cmd_template(args: argparse.Namespace) -> int:
+    """Show the sections and required elements parsed from the SOW template."""
+    ctx = _context(args)
+    print(render_sections(ctx.sections))
+    if args.json:
+        payload = json.dumps([s.model_dump() for s in ctx.sections], indent=2)
+        _write_json(args.json, payload)
+    return 0
+
+
+def cmd_chunks(args: argparse.Namespace) -> int:
+    """Show how documents were split into citable passages."""
+    ctx = _context(args)
+    chunks = ctx.chunks
+    if args.doc:
+        chunks = [c for c in chunks if args.doc in c.doc_id]
+        if not chunks:
+            raise ConfigError(f"no chunks match document filter: {args.doc}")
+
+    print()
+    for chunk in chunks:
+        prov = ctx.partition.provenance[chunk.doc_id]
+        mark = "PASS " if prov.engagement in ctx.roster.admitted_labels else "BLOCK"
+        head = chunk.speaker or chunk.heading_path or ""
+        print(f"{mark} {chunk.chunk_id}")
+        if head:
+            print(f"      ({head})")
+        print(f"      {' '.join(chunk.text.split())[:150]}")
+    print(f"\n{len(chunks)} chunks from {len({c.doc_id for c in chunks})} documents\n")
+    return 0
+
+
+def cmd_evidence(args: argparse.Namespace) -> int:
+    """Show the evidence pool assembled for one section."""
+    ctx = _context(args)
+    spec = ctx.section(args.section)
+    pool = assemble_pool(spec, ctx.evidence, top_k=args.top_k)
+
+    print(render_pool(pool, ctx, show_text=not args.quiet))
+
+    if args.tripwire:
+        print(f"TRIPWIRE TERMS ({len(ctx.tripwire_terms)}) -- proper nouns only in excluded docs:")
+        print("  " + ", ".join(ctx.tripwire_terms))
+        print()
+
+    if args.json:
+        _write_json(args.json, pool.model_dump_json(indent=2))
 
     return 0
 
@@ -61,9 +127,52 @@ def build_parser() -> argparse.ArgumentParser:
         const=str(OUTPUT_DIR / "partition.json"),
         help="Also write the full partition record as JSON (default: output/partition.json).",
     )
-    p_part.add_argument("--data", help="Override the data directory.")
-    p_part.add_argument("--roster", help="Override the engagement roster TOML.")
     p_part.set_defaults(func=cmd_partition)
+
+    p_tpl = sub.add_parser(
+        "template",
+        help="Show the sections and required elements parsed from the SOW template.",
+    )
+    p_tpl.add_argument(
+        "--json",
+        nargs="?",
+        const=str(OUTPUT_DIR / "template.json"),
+        help="Also write the parsed sections as JSON.",
+    )
+    p_tpl.set_defaults(func=cmd_template)
+
+    p_chunks = sub.add_parser("chunks", help="Show how documents were split into passages.")
+    p_chunks.add_argument("--doc", help="Only show chunks whose doc_id contains this string.")
+    p_chunks.set_defaults(func=cmd_chunks)
+
+    p_ev = sub.add_parser(
+        "evidence",
+        help="Show the evidence pool assembled for one section.",
+    )
+    p_ev.add_argument("--section", type=int, required=True, help="Section number, 1-12.")
+    p_ev.add_argument(
+        "--top-k",
+        type=int,
+        default=DEFAULT_TOP_K,
+        help=f"How many BM25 hits to select beyond the pinned set (default {DEFAULT_TOP_K}).",
+    )
+    p_ev.add_argument("--quiet", action="store_true", help="Omit chunk text.")
+    p_ev.add_argument(
+        "--tripwire",
+        action="store_true",
+        help="Also print the derived contamination tripwire terms.",
+    )
+    p_ev.add_argument(
+        "--json",
+        nargs="?",
+        const=str(OUTPUT_DIR / "evidence.json"),
+        help="Also write the pool as JSON.",
+    )
+    p_ev.set_defaults(func=cmd_evidence)
+
+    for sub_parser in (p_part, p_tpl, p_chunks, p_ev):
+        sub_parser.add_argument("--data", help="Override the data directory.")
+        sub_parser.add_argument("--roster", help="Override the engagement roster TOML.")
 
     return parser
 

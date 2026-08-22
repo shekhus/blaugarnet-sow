@@ -176,3 +176,97 @@ class Partition(BaseModel):
         for d in self.decisions:
             out[d.engagement] = out.get(d.engagement, 0) + 1
         return dict(sorted(out.items()))
+
+
+# --------------------------------------------------------------------------- #
+# Stage 4 -- chunking
+# --------------------------------------------------------------------------- #
+
+
+class Chunk(BaseModel):
+    """One citable passage, anchored to its source lines.
+
+    ``text`` is verbatim source: exactly the lines between ``line_start`` and
+    ``line_end`` inclusive, joined by newlines and nothing else. Downstream
+    quote verification checks that every quoted span is a substring of this
+    field, so context such as the heading path is kept beside the text rather
+    than folded into it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    chunk_id: str = Field(description="doc_id#L<start> or doc_id#L<start>-<end>.")
+    doc_id: str
+    text: str
+    line_start: int
+    line_end: int
+    heading_path: str | None = None
+    speaker: str | None = None
+    foreign_mentions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Other engagements named inside this chunk. The chunk is admitted -- "
+            "its document is in scope -- but the mention is surfaced so a claim "
+            "drawn from it can be inspected."
+        ),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Stage 6 -- template parse
+# --------------------------------------------------------------------------- #
+
+
+class SectionSpec(BaseModel):
+    """One SOW section, and what the template says it must contain.
+
+    ``required_elements`` is parsed from the template's own guidance prose, not
+    authored here. Section 12's guidance -- "How deliverables are accepted, by
+    whom, and within what window" -- yields the acceptance-authority
+    requirement that the corpus never satisfies.
+    """
+
+    section_id: int
+    title: str
+    guidance: str
+    required_elements: list[str]
+    subsections: list[str] = Field(default_factory=list)
+
+    def query(self) -> str:
+        """Retrieval query text for this section."""
+        return " ".join([self.title, *self.subsections, *self.required_elements])
+
+
+# --------------------------------------------------------------------------- #
+# Stage 7 -- evidence assembly
+# --------------------------------------------------------------------------- #
+
+
+class ScoredChunk(BaseModel):
+    """A chunk selected for a section's evidence pool, with why it was selected."""
+
+    chunk: Chunk
+    score: float
+    selector: Literal["pinned", "retrieved", "adjacent"]
+    rank: int | None = None
+
+
+class EvidencePool(BaseModel):
+    """Everything one section is allowed to draw on.
+
+    ``excluded_docs`` records how much of the corpus the engagement boundary
+    removed before ranking ran, so the filter's effect is visible per section
+    rather than only in the global partition.
+    """
+
+    section_id: int
+    title: str
+    selected: list[ScoredChunk]
+    candidate_chunks: int
+    excluded_docs: list[str]
+    excluded_chunks: int
+    query: str
+
+    def chunk_ids(self) -> set[str]:
+        """Chunk ids this section may cite. Anything else is a citation failure."""
+        return {sc.chunk.chunk_id for sc in self.selected}

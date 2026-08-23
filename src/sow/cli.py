@@ -29,11 +29,14 @@ from .config import (
 from .evidence import DEFAULT_TOP_K, assemble_pool
 from .ingest import load_corpus
 from .llm import LlmClient
-from .models import ClaimExtraction
+from .models import ClaimExtraction, DraftRun
 from .pipeline import RunContext, build_context
 from .report import render_analysis, render_partition, render_pool, render_sections
+from .review import ReviewContext, parse_script, review_sections, review_summary
 from .run import run_draft
 from .trace import Trace
+from .assemble import build_open_questions, render_document
+from .review import MAX_REDRAFT_ATTEMPTS, MAX_REJECT_CYCLES
 from .validate import MAX_REVISIONS
 
 
@@ -234,6 +237,69 @@ def cmd_draft(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_review(args: argparse.Namespace) -> int:
+    """Walk the drafted sections, approving or rejecting each with a comment."""
+    run_path = OUTPUT_DIR / "run.json"
+    if not run_path.is_file():
+        raise ConfigError(f"no draft to review at {run_path}. Run 'sow draft' first.")
+
+    ctx = _context(args)
+    run = DraftRun.model_validate_json(run_path.read_text(encoding="utf-8"))
+    llm = LlmClient(fixture_dir=FIXTURE_DIR)
+
+    scripted = None
+    if args.script:
+        scripted = parse_script(Path(args.script).read_text(encoding="utf-8"))
+        print(f"non-interactive: {len(scripted)} scripted decision(s)")
+
+    sections = [int(x) for x in args.sections.split(",")] if args.sections else None
+
+    with Trace(OUTPUT_DIR / "trace.jsonl", append=True) as trace:
+        trace.event("review_start", sections=sections, scripted=bool(scripted))
+        review_ctx = ReviewContext(
+            llm=llm,
+            trace=trace,
+            admitted_doc_ids={d.doc_id for d in ctx.partition.admitted},
+            tripwire_terms=ctx.tripwire_terms,
+            max_attempts=args.max_attempts,
+            max_cycles=args.max_cycles,
+        )
+        review_sections(run.sections, review_ctx, section_ids=sections, scripted=scripted)
+
+        # Every terminal state still emits its section: re-render the whole
+        # document so approvals, redrafts and refusals are all reflected.
+        run.open_questions = []
+        for draft in run.sections:
+            draft.open_item_ids = []
+        run.open_questions = build_open_questions(run.sections)
+        document = render_document(run, ctx.roster.target)
+        (OUTPUT_DIR / "sow_draft.md").write_text(document, encoding="utf-8")
+        run_path.write_text(run.model_dump_json(indent=2), encoding="utf-8")
+        (OUTPUT_DIR / "review_log.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "section_id": d.section_id,
+                        "title": d.title,
+                        "status": d.status,
+                        "revision": d.revision,
+                        **d.review.model_dump(mode="json"),
+                    }
+                    for d in sorted(run.sections, key=lambda d: d.section_id)
+                ],
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        trace.event("review_end", decisions={d.section_id: d.review.decision for d in run.sections})
+
+    print(review_summary(run.sections))
+    print(llm.usage.summary(llm.model, llm.provider))
+    print(f"draft re-written to {OUTPUT_DIR / 'sow_draft.md'}")
+    print(f"review log written to {OUTPUT_DIR / 'review_log.json'}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser."""
     parser = argparse.ArgumentParser(
@@ -339,7 +405,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_dr.set_defaults(func=cmd_draft)
 
-    for sub_parser in (p_part, p_tpl, p_chunks, p_ev, p_an, p_dr):
+    p_rv = sub.add_parser(
+        "review",
+        help="Approve or reject each drafted section; rejections are redrafted.",
+    )
+    p_rv.add_argument("--sections", help="Comma-separated section numbers. Default: all.")
+    p_rv.add_argument(
+        "--max-attempts",
+        type=int,
+        default=MAX_REDRAFT_ATTEMPTS,
+        help=(
+            f"Redraft attempts per rejection (default {MAX_REDRAFT_ATTEMPTS}). "
+            f"Exhausting them is an unsatisfiable outcome, not a crash."
+        ),
+    )
+    p_rv.add_argument(
+        "--max-cycles",
+        type=int,
+        default=MAX_REJECT_CYCLES,
+        help=(
+            f"Rejections one section may absorb before it is closed as unsatisfiable "
+            f"(default {MAX_REJECT_CYCLES})."
+        ),
+    )
+    p_rv.add_argument(
+        "--script",
+        help=(
+            "Non-interactive decisions, one per line: '<section> <approve|reject|skip> "
+            "[comment]'. Used by the tests so the loop runs without a terminal."
+        ),
+    )
+    p_rv.set_defaults(func=cmd_review)
+
+    for sub_parser in (p_part, p_tpl, p_chunks, p_ev, p_an, p_dr, p_rv):
         sub_parser.add_argument("--data", help="Override the data directory.")
         sub_parser.add_argument("--roster", help="Override the engagement roster TOML.")
 

@@ -180,6 +180,42 @@ def build_user_prompt(
     return "\n".join(parts)
 
 
+REDRAFT_SYSTEM_PROMPT = (
+    SYSTEM_PROMPT
+    + """
+You are now redrafting after a human reviewer rejected the previous version.
+
+The reviewer's comment is authoritative about what to change. It is NOT
+authoritative about what the sources say. If honouring it would require
+asserting something none of the claims support, do not write that sentence.
+Instead leave the body as close to the previous version as the comment allows,
+and set unsatisfiable_reason to a plain statement of what was asked for and
+which claim would be needed to support it.
+
+Refusing is the correct outcome in that case. A reviewer asking for a fact the
+evidence does not contain is exactly the situation this system exists to catch,
+and satisfying them by inventing the sentence would defeat it.
+"""
+)
+
+
+def build_redraft_prompt(base_prompt: str, previous_body: str, comment: str) -> str:
+    """Extend the original drafting prompt with the reviewer's verbatim comment."""
+    return "\n\n".join(
+        [
+            base_prompt,
+            "PREVIOUS DRAFT (rejected by the reviewer):",
+            previous_body or "(the previous draft was empty)",
+            "REVIEWER COMMENT, VERBATIM:",
+            comment,
+            "Redraft the section addressing that comment. Every rule above still applies: "
+            "assert only what the claims support, cite every factual sentence, and do not "
+            "state a value for anything listed as contested or missing. If the comment "
+            "cannot be honoured within those rules, set unsatisfiable_reason and explain.",
+        ]
+    )
+
+
 def markers_used(body: str) -> list[str]:
     """Citation markers referenced in a drafted body, in order of appearance."""
     seen: list[str] = []

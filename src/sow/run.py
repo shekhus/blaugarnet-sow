@@ -218,6 +218,7 @@ def _run_section(
         missing_elements=analysis.missing_elements,
         issues=issues,
         revision=revision,
+        draft_prompt=draft_user,
     )
     trace.event(
         "section_drafted",

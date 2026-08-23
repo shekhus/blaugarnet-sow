@@ -16,11 +16,20 @@ from typing import Any
 class Trace:
     """Append-only JSONL writer."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, append: bool = False) -> None:
+        """Open the trace.
+
+        Args:
+            append: continue an existing trace rather than truncating it. The
+                review pass appends, so a section's drafting history and the
+                decisions taken on it stay in one file.
+        """
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = self.path.open("w", encoding="utf-8", newline="\n")
         self._seq = 0
+        if append and self.path.is_file():
+            self._seq = sum(1 for _ in self.path.open(encoding="utf-8"))
+        self._fh = self.path.open("a" if append else "w", encoding="utf-8", newline="\n")
 
     def event(self, kind: str, section_id: int | None = None, **payload: Any) -> None:
         """Write one trace event."""

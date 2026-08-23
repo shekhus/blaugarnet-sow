@@ -396,6 +396,14 @@ class DraftedSection(BaseModel):
         default_factory=list,
         description="Anything the model could not state from the claims it was given.",
     )
+    unsatisfiable_reason: str | None = Field(
+        default=None,
+        description=(
+            "Set only when redrafting from a reviewer comment that cannot be honoured "
+            "without asserting something no claim supports. Naming the obstacle is the "
+            "correct outcome; inventing a sentence to satisfy the reviewer is not."
+        ),
+    )
 
 
 class Citation(BaseModel):
@@ -465,6 +473,13 @@ class SectionDraft(BaseModel):
     issues: list[ValidationIssue] = Field(default_factory=list)
     revision: int = 0
     review: ReviewRecord = Field(default_factory=ReviewRecord)
+    draft_prompt: str = Field(
+        default="",
+        description=(
+            "The exact drafting prompt, kept so the review loop can redraft from a "
+            "comment without re-running extraction. Makes run.json a replayable record."
+        ),
+    )
 
 
 class OpenQuestion(BaseModel):

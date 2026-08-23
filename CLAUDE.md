@@ -49,8 +49,9 @@ README.md         assumptions, design choices, quality measures, next steps
 
 ## Environment
 - Python 3.11+
-- LLM API key read from the environment variable `OPENAI_API_KEY` — never
-  hardcoded, never committed. `.env.example` is committed; `.env` is gitignored.
+- LLM API key read from `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) — never
+  hardcoded, never committed. `.env.example` is committed; `.env` is gitignored,
+  and values in it override an exported shell variable of the same name.
   `src/sow/llm.py` is the only provider-specific module; everything downstream
   consumes validated pydantic models and is provider-agnostic.
 - Pinned versions in `requirements.txt`.

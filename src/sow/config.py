@@ -7,6 +7,7 @@ use (see ``sow.llm``), never from a config file.
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass
 from functools import lru_cache
@@ -35,13 +36,19 @@ class ConfigError(RuntimeError):
 def load_dotenv(path: Path | None = None) -> list[str]:
     """Load ``KEY=value`` pairs from ``.env`` into the environment.
 
-    Hand-rolled rather than pulling in python-dotenv: it is twenty lines and the
+    Hand-rolled rather than pulling in python-dotenv: it is thirty lines and the
     dependency list is meant to stay short enough that a reviewer can install
     this on a clean machine without thinking about it.
 
-    Real environment variables always win, so an exported key is never silently
-    overridden by a stale file. Returns the names of the variables it set, for
-    the startup report.
+    ``.env`` **overrides** an exported variable of the same name, which is the
+    opposite of the usual convention and is deliberate. ``.env`` is this
+    project's documented way to supply a key, so a value written there is the
+    more recent intent; a shell variable left over from an earlier session is
+    the likelier stale one. Silently preferring the stale export produces the
+    worst possible symptom -- a freshly pasted key that appears to be rejected.
+
+    Any override is announced on stderr rather than done quietly. Returns the
+    names of every variable set, for the startup report.
     """
     env_path = path or ENV_PATH
     if not env_path.is_file():
@@ -59,9 +66,15 @@ def load_dotenv(path: Path | None = None) -> list[str]:
             continue
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
-            applied.append(key)
+        if not key:
+            continue
+        if key in os.environ and os.environ[key] != value:
+            print(
+                f"note: {key} from {env_path.name} overrides the exported shell value",
+                file=sys.stderr,
+            )
+        os.environ[key] = value
+        applied.append(key)
     return applied
 
 

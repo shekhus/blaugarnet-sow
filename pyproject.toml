@@ -12,7 +12,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-llm = ["openai>=2,<3"]
+llm = ["anthropic>=0.69,<1"]
+openai = ["openai>=2,<3"]
 dev = ["pytest>=8,<9"]
 
 [project.scripts]

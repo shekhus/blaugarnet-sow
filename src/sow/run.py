@@ -87,7 +87,7 @@ def run_draft(
             drafts.append(draft)
             analyses.append(analysis)
 
-        cross_issues = cross_section_check(analyses)
+        cross_issues = cross_section_check(analyses, ctx.partition.provenance)
         for issue in cross_issues:
             for draft in drafts:
                 if draft.section_id in issue.section_ids and draft.status == "drafted":

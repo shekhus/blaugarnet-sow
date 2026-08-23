@@ -17,8 +17,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from .authority import resolve
 from .models import (
     CrossSectionIssue,
+    DocProvenance,
     DraftRun,
     Finding,
     OpenQuestion,
@@ -73,7 +75,9 @@ def build_open_questions(drafts: list[SectionDraft]) -> list[OpenQuestion]:
     return questions
 
 
-def cross_section_check(analyses: list[SectionAnalysis]) -> list[CrossSectionIssue]:
+def cross_section_check(
+    analyses: list[SectionAnalysis], provs: dict[str, DocProvenance]
+) -> list[CrossSectionIssue]:
     """Find facts that two sections settled differently.
 
     Per-section review cannot catch this: the go-live date is drafted in the
@@ -82,8 +86,20 @@ def cross_section_check(analyses: list[SectionAnalysis]) -> list[CrossSectionIss
     """
     values_by_key: dict[str, dict[str, set[int]]] = defaultdict(lambda: defaultdict(set))
     for analysis in analyses:
+        by_key: dict[str, list] = defaultdict(list)
         for claim in analysis.claims:
-            values_by_key[claim.fact_key][claim.value_norm].add(analysis.section_id)
+            by_key[claim.fact_key].append(claim)
+        for fact_key, members in by_key.items():
+            resolution = resolve(fact_key, members, provs)
+            # Compare what each section actually settled on, not every phrasing
+            # its claims used. Two sections that resolved a fact identically but
+            # quoted it differently -- "UAT: 2026-11-30 - 2026-12-11" against the
+            # same window with the regression period appended -- are not in
+            # conflict, and reporting them as such buries the real divergences.
+            # A key the section left contested is already disclosed there; it
+            # does not need to be counted again as a cross-section issue.
+            if resolution.resolved and resolution.winner is not None:
+                values_by_key[fact_key][resolution.winner.value_norm].add(analysis.section_id)
 
     issues: list[CrossSectionIssue] = []
     for fact_key, by_value in sorted(values_by_key.items()):

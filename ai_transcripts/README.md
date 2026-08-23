@@ -1,12 +1,13 @@
 # Transcript index
 
-Topic index for [`ai_transcripts.md`](ai_transcripts.md) — 4,332 lines, one
-Claude Code session covering the whole build.
+Topic index for [`session-01.md`](session-01.md) — 4,332 lines, one Claude Code
+session covering the whole build, from first commit to final test run.
 
 Kept as a separate file on purpose: every reference below is a line number into
 the transcript, and prepending an index would shift all of them.
 
-**How to jump.** `sed -n '760,812p' ai_transcripts.md`, or `:760` in an editor.
+**How to jump.** `sed -n '760,812p' ai_transcripts/session-01.md`, or `:760` in
+an editor.
 
 ---
 

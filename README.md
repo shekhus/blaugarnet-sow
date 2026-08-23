@@ -378,6 +378,22 @@ corpus records it as an open negotiation point.
 
 ---
 
+## AI transcripts
+
+`ai_transcripts/` holds the session this was built in.
+
+- [`ai_transcripts/README.md`](ai_transcripts/README.md) — topic index: turn
+  boundaries, where each design decision was argued, the bugs live runs found,
+  and the measured results. Every entry is a line number into the transcript.
+- [`ai_transcripts/session-01.md`](ai_transcripts/session-01.md) — the export,
+  4,332 lines.
+
+The index's final section records what the export is missing: one turn restored
+after a context compaction dropped it (marked in place), one deliberately
+omitted, and tool output collapsed throughout by the export itself.
+
+---
+
 ## Pipeline
 
 | # | Stage | Model? |

@@ -166,12 +166,14 @@ class LlmClient:
         backend: str | None = None,
         provider: str | None = None,
         fixture_dir: Path | None = None,
+        record_fixtures: bool = False,
     ) -> None:
         self.provider = provider or detect_provider()
         self.model = model or os.environ.get("SOW_MODEL") or DEFAULT_MODEL[self.provider]
         self.backend = (backend or os.environ.get("SOW_LLM", "live")).lower()
         self.usage = TokenUsage()
         self.fixture_dir = fixture_dir
+        self.record_fixtures = record_fixtures
         self._client: Any = None
 
         if self.backend not in ("live", "mock"):
@@ -193,12 +195,16 @@ class LlmClient:
         client = self._live_client()
         try:
             if self.provider == "anthropic":
-                return self._parse_anthropic(
+                parsed = self._parse_anthropic(
                     client, stage, system, user, output_format, max_tokens, effort
                 )
-            return self._parse_openai(
-                client, stage, system, user, output_format, max_tokens, effort
-            )
+            else:
+                parsed = self._parse_openai(
+                    client, stage, system, user, output_format, max_tokens, effort
+                )
+            if self.record_fixtures:
+                self.record(stage, system, user, parsed)
+            return parsed
         except LlmError:
             raise
         except Exception as exc:  # surfaced, never swallowed

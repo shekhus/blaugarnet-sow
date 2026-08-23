@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .admission import build_partition
 from .analysis import analyse_section
+from .audit import audit_paths
 from .claims import STAGE, SYSTEM_PROMPT, build_user_prompt, verify_claims
 from .config import (
     DATA_DIR,
@@ -201,7 +202,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 def cmd_draft(args: argparse.Namespace) -> int:
     """Draft every section end to end and write the document, trace and records."""
     ctx = _context(args)
-    llm = LlmClient(fixture_dir=FIXTURE_DIR)
+    llm = LlmClient(fixture_dir=FIXTURE_DIR, record_fixtures=args.record)
     sections = (
         [int(x) for x in args.sections.split(",")] if args.sections else None
     )
@@ -298,6 +299,17 @@ def cmd_review(args: argparse.Namespace) -> int:
     print(f"draft re-written to {OUTPUT_DIR / 'sow_draft.md'}")
     print(f"review log written to {OUTPUT_DIR / 'review_log.json'}")
     return 0
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    """Re-verify a produced draft against the corpus, from scratch."""
+    draft_path = Path(args.draft) if args.draft else OUTPUT_DIR / "sow_draft.md"
+    if not draft_path.is_file():
+        raise ConfigError(f"no draft at {draft_path}. Run 'sow draft' first.")
+    ctx = _context(args)
+    result = audit_paths(draft_path, ctx, OUTPUT_DIR / "run.json")
+    print(result.render())
+    return 0 if result.passed else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -403,6 +415,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=MAX_REVISIONS,
         help=f"Redraft attempts after a validation failure (default {MAX_REVISIONS}).",
     )
+    p_dr.add_argument(
+        "--record",
+        action="store_true",
+        help=(
+            "Save every model response to tests/fixtures/golden_run so the suite can "
+            "replay this run offline with SOW_LLM=mock."
+        ),
+    )
     p_dr.set_defaults(func=cmd_draft)
 
     p_rv = sub.add_parser(
@@ -437,7 +457,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_rv.set_defaults(func=cmd_review)
 
-    for sub_parser in (p_part, p_tpl, p_chunks, p_ev, p_an, p_dr, p_rv):
+    p_au = sub.add_parser(
+        "audit",
+        help="Re-verify a produced draft against the corpus. Exits non-zero on failure.",
+    )
+    p_au.add_argument("--draft", help="Path to the draft (default output/sow_draft.md).")
+    p_au.set_defaults(func=cmd_audit)
+
+    for sub_parser in (p_part, p_tpl, p_chunks, p_ev, p_an, p_dr, p_rv, p_au):
         sub_parser.add_argument("--data", help="Override the data directory.")
         sub_parser.add_argument("--roster", help="Override the engagement roster TOML.")
 

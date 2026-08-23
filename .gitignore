@@ -34,3 +34,6 @@ output/*
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Assignment brief — their document, not work product. Kept locally, not shipped.
+*.docx

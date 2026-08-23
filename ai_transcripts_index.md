@@ -1,6 +1,6 @@
 # Transcript index
 
-Topic index for [`ai_transcripts.md`](ai_transcripts.md) — 4,290 lines, one
+Topic index for [`ai_transcripts.md`](ai_transcripts.md) — 4,332 lines, one
 Claude Code session covering the whole build.
 
 Kept as a separate file on purpose: every reference below is a line number into
@@ -16,8 +16,8 @@ the transcript, and prepending an index would shift all of them.
 | --- | --- | --- |
 | Corpus analysis | 15–759 | Read all 26 documents, map them, verify the map against sources |
 | Architecture | 760–1345 | Design proposed, two decisions challenged and changed |
-| Build CP1–CP6 | 1346–4245 | Six checkpoints, each run and reviewed before the next |
-| Wrap-up | 4246–4290 | Final commit, submission note |
+| Build CP1–CP6 | 1346–4287 | Six checkpoints, each run and reviewed before the next |
+| Wrap-up | 4288–4332 | Final commit, submission note |
 
 Six checkpoint commits plus two course corrections; `git log --oneline` in the
 repo lines up with the phases above.
@@ -39,10 +39,11 @@ repo lines up with the phases above.
 | 1346 | Build in six checkpoints — CP1 delivered |
 | 1777 | CP2 — chunking, template parse, BM25, evidence assembly |
 | 2711 | CP3 — claim extraction, quote verification, analysis |
-| 3325 | OpenAI account unfunded → switch back to Anthropic |
-| 3791 | CP5 — review CLI and terminal states |
-| 4098 | CP6 — tests, golden run, README |
-| 4246 | `commit code` — final |
+| 3260 | **CP4** — draft and validate, all 12 sections, end to end *(restored)* |
+| 3367 | OpenAI account unfunded → switch back to Anthropic |
+| 3833 | CP5 — review CLI and terminal states |
+| 4140 | CP6 — tests, golden run, README |
+| 4288 | `commit code` — final |
 
 ---
 
@@ -88,9 +89,9 @@ Live runs and inspection found things reading the code did not.
 | 2258 | Contamination tripwire fired on `Milestones` / `Objectives` — the template's own section headings |
 | 2439 | **No stemming**: query `rates` never matched `Hourly rate`, so §8 was assembled with the deal-note rules but no actual rates |
 | 2502 | Short replies carry corrections but score nothing alone — adjacent turns pulled in |
-| 3685 | Cross-section check compared raw phrasings, not resolved winners — one UAT window read as seven values |
-| 3759 | Only **3 of 12** sections passed validation first try; all failures `uncited_assertion` |
-| 4024 | Scripted rejection looped forever — **810 MB of trace** before it was killed |
+| 3727 | Cross-section check compared raw phrasings, not resolved winners — one UAT window read as seven values |
+| 3801 | Only **3 of 12** sections passed validation first try; all failures `uncited_assertion` |
+| 4066 | Scripted rejection looped forever — **810 MB of trace** before it was killed |
 
 ---
 
@@ -98,9 +99,9 @@ Live runs and inspection found things reading the code did not.
 
 | Line | Event |
 | --- | --- |
-| 3287 | OpenAI `insufficient_quota` |
-| 3325 | Switch back to Anthropic; dual-provider client |
-| 3927 | Anthropic credit exhausted mid-build |
+| 3267 | OpenAI `insufficient_quota` |
+| 3367 | Switch back to Anthropic; dual-provider client |
+| 3969 | Anthropic credit exhausted mid-build |
 | — | `.env` was never loaded at all; then a stale exported key shadowed the working one in `.env` |
 
 ---
@@ -111,9 +112,9 @@ Live runs and inspection found things reading the code did not.
 | --- | --- |
 | 895, 1350, 1715 | Corpus partition: **20 admitted / 6 blocked**, zero ambiguous |
 | 1111 | `rejected_unsatisfiable` introduced as a real terminal state |
-| 3745 | Real run: **36 calls, 244,475 tokens, ~USD 2.93** |
-| 4129 | Draft audit passes: **196 citations** across 12 sections |
-| 4143 | **101 tests pass**, no API key, no network |
+| 3787 | Real run: **36 calls, 244,475 tokens, ~USD 2.93** |
+| 4171 | Draft audit passes: **196 citations** across 12 sections |
+| 4185 | **101 tests pass**, no API key, no network |
 
 ---
 
@@ -122,15 +123,19 @@ Live runs and inspection found things reading the code did not.
 Stated because the export is evidence, and an incomplete one should not look
 complete.
 
-- **Two turns are missing.** The question about whether to use an OpenAI key,
-  and the CP4 request (draft and validate, all 12 sections). The work they
-  produced is present; the prompts are not.
-- **The export is compacted.** It ends with a `※ recap:` line, and tool output
-  is collapsed to `Ran N shell commands (ctrl+o to expand)` rather than shown in
-  full, so command output and file diffs are largely absent.
+- **One turn was restored.** The CP4 request and the first part of its response
+  were dropped by the context compaction at line 3250 and have been restored
+  from the session, marked with a `RESTORED` banner at line 3252. Content is
+  accurate; the banner is there so the file does not present reconstructed text
+  as raw export output.
+- **One turn is still missing, deliberately.** A short exchange about whether to
+  use an OpenAI key was also lost to that compaction and has been left out. Its
+  outcome — the switch to OpenAI and back again — is visible from line 3267.
+- **The export is compacted throughout.** Nine `※ recap:` markers appear where
+  context was summarised, and tool output is collapsed to
+  `Ran N shell commands (ctrl+o to expand)`, so command output and file diffs
+  are largely absent.
 - **The session continues past the export.** The submission note was drafted
-  after `/export` at line 4289 and is not in the file.
+  after `/export` at line 4331 and is not in the file.
 
-A second `/export` after the final turn would close the last gap; recovering the
-two missing prompts would need the raw session log rather than the rendered
-export.
+A second `/export` after the final turn would close the last gap.

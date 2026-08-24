@@ -1,4 +1,4 @@
-# The SOW Drafter, explained in plain language
+# The SOW Drafter, explained
 
 A walkthrough of what this project was asked to do, why it was harder than it
 looks, how it works, and where it still falls short.

@@ -122,3 +122,65 @@ def test_clean_section_has_no_findings(ctx):
     assert analysis.missing_elements == []
     assert [f for f in analysis.findings if f.kind == "conflict"] == []
     assert analysis.status == "clean"
+
+
+# --------------------------------------------------------------------------- #
+# G12 -- the acceptance authority the corpus never names.
+#
+# Coverage used to be whatever the model said it was. Section 12 asks "by whom",
+# the model offered the playbook rule requiring that every SOW name an acceptance
+# authority, and the gap went unreported while the draft asserted the opposite.
+# These pin the verification that now stands between the two.
+# --------------------------------------------------------------------------- #
+
+PLAYBOOK = "internal/blaugarnet_sales_playbook_extract.md"
+PLAYBOOK_RULE = (
+    "5. Every SOW names the client-side acceptance authority. Post-Helios, no exceptions."
+)
+
+
+def test_policy_demanding_a_party_does_not_supply_one(ctx):
+    """G12, exactly as it occurred: the real quote, the real element."""
+    analysis, _ = _run(ctx, 12, _extraction(
+        ("acceptance_authority", "SOW names the client-side acceptance authority",
+         f"{PLAYBOOK}#L8", PLAYBOOK_RULE, ["by whom"]),
+    ))
+
+    assert "by whom" in analysis.missing_elements
+    gap = next(f for f in analysis.findings if f.required_element == "by whom")
+    assert gap.kind == "insufficient"
+    assert "company-wide policy" in gap.detail
+    assert analysis.status in ("insufficient", "conflict_and_insufficient")
+
+
+def test_an_engagement_source_can_supply_a_party(ctx):
+    """The rule must not simply refuse every party element."""
+    analysis, _ = _run(ctx, 12, _extraction(
+        ("acceptance_authority", "Karen Boyle",
+         f"{SCOPING}#L33", "Acceptance — how do we formally accept deliverables?",
+         ["by whom"]),
+    ))
+    assert "by whom" not in analysis.missing_elements
+
+
+def test_a_recorded_absence_is_not_an_answer(ctx):
+    """A source saying the authority is TBD has not named one."""
+    analysis, _ = _run(ctx, 12, _extraction(
+        ("acceptance_authority", "TBD",
+         f"{SCOPING}#L33", "Acceptance — how do we formally accept deliverables?",
+         ["by whom"]),
+    ))
+    assert "by whom" in analysis.missing_elements
+
+
+def test_company_policy_still_covers_a_non_party_element(ctx):
+    """The narrowing is confined to elements asking *who*.
+
+    Rates live only on the company-wide cards; requiring engagement-specific
+    support everywhere would invent gaps the corpus does not have.
+    """
+    analysis, _ = _run(ctx, 12, _extraction(
+        ("acceptance_mechanism", "release checklist sign-off",
+         f"{PLAYBOOK}#L8", PLAYBOOK_RULE, ["How deliverables are accepted"]),
+    ))
+    assert "How deliverables are accepted" not in analysis.missing_elements

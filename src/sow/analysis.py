@@ -12,6 +12,19 @@ Both detections are structural:
   element list comes from the template's own guidance prose, so the check is
   driven by what the document must contain rather than by a list of things
   somebody thought to look for.
+
+Coverage is the one place the model used to be believed. It reports which
+elements each claim supports, and that report was taken at face value -- which
+made "is this requirement met?" a model judgement in a pipeline that keeps every
+other judgement in code. It failed exactly where it mattered: section 12 asks for
+the acceptance authority "by whom", the model offered the sales playbook rule
+*"Every SOW names the client-side acceptance authority"*, and coverage accepted a
+policy demanding a name as though it supplied one.
+
+So a coverage report is now a proposal that code verifies. For elements asking
+*who*, the verification is structural: only a document about this engagement can
+name this engagement's people, and the claim's value must actually contain a
+name. See ``_coverage``.
 """
 
 from __future__ import annotations
@@ -45,6 +58,24 @@ _LONG_DATE = re.compile(
 )
 _DAY_FIRST = re.compile(
     r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(" + "|".join(_MONTHS) + r")\s+(\d{4})\b",
+    re.IGNORECASE,
+)
+
+# Required elements that ask *who* rather than *what*. Derived from the
+# template's own wording, so a template that stops asking for a party stops
+# triggering this: "by whom", "who approves change requests", "named client
+# counterparts".
+_PARTY_ELEMENT = re.compile(
+    r"\b(whom|who|authority|signator(?:y|ies)|counterparts?|approver)\b",
+    re.IGNORECASE,
+)
+
+# Values that record the absence of an answer rather than an answer. A source
+# that says the authority is "TBD" is not a source that names one.
+_PLACEHOLDER_VALUE = re.compile(
+    r"^(tbd|tba|n/?a|none|unknown|open|pending|"
+    r"to be (confirmed|determined|decided|agreed|named)|"
+    r"not (yet )?(confirmed|determined|decided|agreed|named|defined))\b",
     re.IGNORECASE,
 )
 
@@ -149,14 +180,12 @@ def analyse_section(
                 )
             )
 
-    covered, missing = _coverage(spec, claims)
+    covered, missing, reasons = _coverage(spec, claims, provs)
     for element in missing:
         findings.append(
             Finding(
                 kind="insufficient",
-                detail=(
-                    f"the template requires '{element}' and no admitted source supports it"
-                ),
+                detail=f"the template requires '{element}' {reasons[element]}",
                 required_element=element,
             )
         )
@@ -185,13 +214,64 @@ def analyse_section(
     )
 
 
-def _coverage(spec: SectionSpec, claims: list[Claim]) -> tuple[list[str], list[str]]:
-    """Split the template's required elements into covered and missing."""
-    supported = {
-        element.strip().lower()
-        for claim in claims
-        for element in claim.supports_elements
-    }
-    covered = [e for e in spec.required_elements if e.strip().lower() in supported]
-    missing = [e for e in spec.required_elements if e.strip().lower() not in supported]
-    return covered, missing
+def supplies_a_party(claim: Claim, provs: dict[str, DocProvenance]) -> bool:
+    """True when this claim could name a party for *this* engagement.
+
+    Two structural conditions, neither of which needs to understand the sentence.
+
+    The document must be about the engagement rather than company-wide. A policy
+    that applies to every SOW cannot know who signs this one off; it is the source
+    of the requirement, not of an answer. This is what the section 12 gap turned
+    on -- the only support for "by whom" was the playbook rule demanding a name.
+
+    And the value must not be a recorded absence. "TBD" is a source telling you
+    it has no answer.
+    """
+    prov = provs.get(claim.doc_id)
+    if prov is None or prov.engagement == "company":
+        return False
+    return not _PLACEHOLDER_VALUE.match(claim.value.strip())
+
+
+def _coverage(
+    spec: SectionSpec, claims: list[Claim], provs: dict[str, DocProvenance]
+) -> tuple[list[str], list[str], dict[str, str]]:
+    """Split required elements into covered and missing, and say why for missing.
+
+    The model proposes which elements each claim supports; this verifies the
+    proposal rather than accepting it. An element asking for a party is covered
+    only when some claim actually supplies one -- see ``_supplies_a_party``. For
+    every other element the model's report still stands, which is a narrower
+    trust than before but not yet none: see the README's known weaknesses.
+    """
+    proposed: dict[str, list[Claim]] = {}
+    for claim in claims:
+        for element in claim.supports_elements:
+            proposed.setdefault(element.strip().lower(), []).append(claim)
+
+    covered: list[str] = []
+    missing: list[str] = []
+    reasons: dict[str, str] = {}
+
+    for element in spec.required_elements:
+        backing = proposed.get(element.strip().lower(), [])
+
+        if not backing:
+            missing.append(element)
+            reasons[element] = "and no admitted source supports it"
+            continue
+
+        if _PARTY_ELEMENT.search(element) and not any(
+            supplies_a_party(claim, provs) for claim in backing
+        ):
+            missing.append(element)
+            reasons[element] = (
+                "which asks for a party; the only support is company-wide policy "
+                "requiring that such a party be named, or a source recording that "
+                "none has been named yet"
+            )
+            continue
+
+        covered.append(element)
+
+    return covered, missing, reasons

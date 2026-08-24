@@ -17,7 +17,7 @@ rather than guessing.
 python -m venv .venv && . .venv/Scripts/activate    # or bin/activate
 pip install -e ".[llm,dev]"
 
-pytest                                   # 101 tests, no API key needed
+pytest                                   # 109 tests, no API key needed
 
 cp .env.example .env                     # add ANTHROPIC_API_KEY (or OPENAI_API_KEY)
 sow draft                                # writes output/sow_draft.md
@@ -263,7 +263,7 @@ attached to the wrong line range, and a foreign entity in prose.
 
 ### Test suite
 
-**101 tests, ~0.5s, no API key.** Every test is deterministic; none imports a
+**109 tests, ~0.5s, no API key.** Every test is deterministic; none imports a
 provider SDK.
 
 ```
@@ -420,6 +420,28 @@ what was flagged), `output/run.json`, `output/review_log.json`.
 
 ## Known weaknesses
 
+**Element coverage is still partly the model's word.** Extraction reports which
+required elements each claim satisfies, and that report used to be believed
+outright — which made *"is this requirement met?"* a model judgement inside a
+pipeline that keeps every other judgement in code. It failed where it mattered
+most: section 12's **"by whom"**, backed only by the playbook rule *"Every SOW
+names the client-side acceptance authority"*, was scored as covered, and the
+recorded run reported zero missing elements across all twelve sections. That
+draft in `output/` predates the fix and still asserts an acceptance authority
+the corpus never names.
+
+Coverage is now a proposal that `_coverage` verifies. Elements asking *who* —
+matched from the template's own wording, not a hand-written list — require a
+source that is **about this engagement rather than company-wide** (a policy
+applying to every SOW cannot know who signs this one off) and a value that is
+**not a recorded absence** (`TBD` is not a name). `tests/test_analysis.py` pins
+G12 with the real playbook quote, and pins that the rule neither refuses every
+party element nor leaks into elements that ask *what*.
+
+Two limits remain. The check confirms an engagement source names *somebody*, not
+that it is the *right* somebody — that is entailment again. And elements that do
+not ask *who* are still covered on the model's say-so. Narrower trust, not none.
+
 **Uncited assertions on first draft.** On the real run only **3 of 12** sections
 passed validation first time; all 26 gate failures were `uncited_assertion`.
 Seven recovered on redraft, two exhausted their retries and shipped as
@@ -430,7 +452,7 @@ would cut roughly half the drafting tokens.
 **The golden run is not recorded.** `sow draft --record` writes the fixtures and
 `tests/test_golden_run.py` replays them offline, but the API accounts available
 during development ran out of credit, so the fixtures are absent and those two
-tests skip. The other 101 tests are deterministic and unaffected.
+tests skip. The other 109 tests are deterministic and unaffected.
 
 **Fact-key stability is the hinge.** Conflict detection depends on the model
 using the same `fact_key` for the same fact across passages. It held on the real

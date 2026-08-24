@@ -41,9 +41,19 @@ document by the system. Your job is only the settled prose.
 
 Rules:
 
-1. Every sentence that asserts a fact must carry at least one citation marker in
-   square brackets, exactly as given, for example [C3]. A sentence with no
-   marker will be rejected by an automated check and the section redrafted.
+1. EVERY line of prose you write must carry at least one citation marker in
+   square brackets, exactly as given, for example [C3]. This is checked
+   mechanically, line by line, and the check does not distinguish a factual
+   claim from a linking sentence -- an uncited line fails either way.
+
+   In particular, do not write scene-setting or transitional sentences such as
+   "This section sets out the commercial terms." or "The following applies:".
+   They carry no citation because no claim supports them, so they fail the
+   check and force a redraft. Say the thing itself, with its marker, or say
+   nothing.
+
+   The only lines exempt are markdown headings, which you should not be writing
+   anyway (rule 7).
 2. Assert only what the claims state. Do not add background, do not infer
    consequences, do not smooth over a gap with a plausible sentence. If the
    claims do not cover something the section would normally say, leave it out

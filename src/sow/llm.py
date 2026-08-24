@@ -66,6 +66,7 @@ class TokenUsage:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    last: tuple[int, int] = (0, 0)
     per_stage: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def record(self, stage: str, usage: Any) -> None:
@@ -85,6 +86,7 @@ class TokenUsage:
         inp = pick("input_tokens", "prompt_tokens")
         out = pick("output_tokens", "completion_tokens")
         cached = pick("cache_read_input_tokens")
+        self.last = (inp, out)
 
         self.calls += 1
         self.input_tokens += inp
@@ -175,6 +177,7 @@ class LlmClient:
         self.fixture_dir = fixture_dir
         self.record_fixtures = record_fixtures
         self._client: Any = None
+        self._last_usage: tuple[int, int] = (0, 0)
 
         if self.backend not in ("live", "mock"):
             raise ConfigError(f"SOW_LLM must be 'live' or 'mock', got '{self.backend}'")
@@ -333,7 +336,11 @@ class LlmClient:
         return output_format.model_validate(payload["parsed_output"])
 
     def record(self, stage: str, system: str, user: str, parsed: BaseModel) -> None:
-        """Write one call to the fixture directory for later mock replay."""
+        """Write one call to the fixture directory for later mock replay.
+
+        The real token counts are stored alongside the response, so replaying a
+        golden run reports what the recorded run actually cost rather than zero.
+        """
         if self.fixture_dir is None:
             raise ConfigError("recording requires a fixture directory")
         self.fixture_dir.mkdir(parents=True, exist_ok=True)
@@ -344,7 +351,10 @@ class LlmClient:
                     "stage": stage,
                     "provider": self.provider,
                     "model": self.model,
-                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                    "usage": {
+                        "input_tokens": self.usage.last[0],
+                        "output_tokens": self.usage.last[1],
+                    },
                     "parsed_output": parsed.model_dump(mode="json"),
                 },
                 indent=2,
